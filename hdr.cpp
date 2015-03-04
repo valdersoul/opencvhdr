@@ -19,8 +19,11 @@ inline void rgb2v(int r, int g, int b, int&v){
 }
 
 /*list.txt contains filenames for images and its exposure time(s)*/
-void loadExposureSeq(String path, vector<Mat>& images, vector<float>& times)
+void loadExposureSeq(String path, vector<Mat>& images, vector<float>& times, String gray)
 {
+	int flag = 1;
+	if(!gray.compare("gray"))
+		flag = 0;
 	path = path + std::string("/");
 	ifstream list_file;
 	string fileName = path + "list.txt";
@@ -28,7 +31,7 @@ void loadExposureSeq(String path, vector<Mat>& images, vector<float>& times)
 	string name;
 	float val;
 	while (list_file >> name >> val) {
-		Mat img = imread(path + name);
+		Mat img = imread(path + name, flag);
 		images.push_back(img);
 		times.push_back(log(val));
 	}
@@ -39,13 +42,14 @@ void splitChannels(vector<Mat>& images, vector<Mat>& Reds, vector<Mat>& Greens, 
 	for (int i = 0; i < images.size(); i++){
 		Mat channels[3];
 		split(images[i], channels);
-		Reds.push_back(channels[2]);
-		Greens.push_back(channels[1]);
-		Blues.push_back(channels[0]);
+		channels[2].copyTo(Reds[i]);
+		channels[1].copyTo(Greens[i]);
+		channels[0].copyTo(Blues[i]);
 	}
 }
 
 void getRandomLocation(Mat values, vector<int>& locations){
+	cout << "fuck" << endl;
 	int numPixels = values.rows*values.cols;
 	locations.clear();
 	int sameValues;
@@ -175,10 +179,10 @@ void releaseMatVec(vector<Mat>& i){
 	i.clear();
 }
 
-void makehdr(vector<Mat>& images, vector<float>& times, double lambda, string output, bool isNIR){
-	vector<Mat> Reds;
-	vector<Mat> Greens;
-	vector<Mat> Blues;
+void makehdr(vector<Mat> images, vector<float>& times, double lambda, string output, bool isNIR){
+	vector<Mat> Reds(images.size());
+	vector<Mat> Greens(images.size());
+	vector<Mat> Blues(images.size());
 
 	vector<int> rpixelLocations;
 	vector<int> gpixelLocations;
@@ -187,28 +191,38 @@ void makehdr(vector<Mat>& images, vector<float>& times, double lambda, string ou
 	const int numRows = images[0].rows;
 	const int numCols = images[0].cols;
 	const int numPixels = numRows*numCols;
+	const int channel = images[0].channels();
 
-	splitChannels(images, Reds, Greens, Blues);
-	imwrite("be.jpeg", Reds[0]);
-	if(isNIR){
-		for(int i = 0; i < images.size();i++){
-			Mat vChanel = Mat::zeros(numRows, numCols, CV_8U);
-			for(int r = 0; r < numRows; r++)
-				for(int c = 0; c < numCols; c++){
-					rgb2v(static_cast<int>(Reds[i].at<uchar>(r,c)),
-								static_cast<int>(Greens[i].at<uchar>(r,c)),
-								static_cast<int>(Blues[i].at<uchar>(r,c)),
-								(int&)vChanel.at<uchar>(r,c));
-					Reds[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
-					Greens[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
-					Blues[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
-				}
-			vChanel.release();
+	if(channel != 1){
+		cout << "Color" << endl;
+		splitChannels(images, Reds, Greens, Blues);
+		if(isNIR){
+			for(int i = 0; i < images.size();i++){
+				Mat vChanel = Mat::zeros(numRows, numCols, CV_8U);
+				for(int r = 0; r < numRows; r++)
+					for(int c = 0; c < numCols; c++){
+						rgb2v(static_cast<int>(Reds[i].at<uchar>(r,c)),
+									static_cast<int>(Greens[i].at<uchar>(r,c)),
+									static_cast<int>(Blues[i].at<uchar>(r,c)),
+									(int&)vChanel.at<uchar>(r,c));
+						Reds[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
+						Greens[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
+						Blues[i].at<uchar>(r,c) = vChanel.at<uchar>(r,c);
+					}
+				vChanel.release();
+			}
 		}
 	}
-
+	else{
+		cout << "Gray" << endl;
+		for(int i = 0; i < images.size();i++){
+			images[i].copyTo(Reds[i]);
+			images[i].copyTo(Greens[i]);
+			images[i].copyTo(Blues[i]);
+		}
+	}
 	int mid = images.size() / 2;
-	imwrite("v.jpeg", Reds[0]);
+	//cout << Reds[0].at<float>(0) << endl;
 	Mat red_map;
 	red_map = Mat::zeros(Reds[0].rows, Reds[0].cols, CV_32F);
 	getRandomLocation(Reds[mid], rpixelLocations);
@@ -223,6 +237,11 @@ void makehdr(vector<Mat>& images, vector<float>& times, double lambda, string ou
 	blue_map = Mat::zeros(Blues[0].rows, Blues[0].cols, CV_32F);
 	getRandomLocation(Blues[mid], bpixelLocations);
 	vector<float> lBE, bg;
+
+	if(channel == 1){
+		gpixelLocations = rpixelLocations;
+		bpixelLocations = rpixelLocations;
+	}
 
 	thread red(LSQ, "red",&Reds, ref(times), ref(rpixelLocations), ref(lambda), ref(lRE), ref(rg), &red_map);
 	thread green(LSQ, "green", &Greens, ref(times), ref(gpixelLocations), ref(lambda), ref(lGE), ref(gg), &green_map);
@@ -277,13 +296,12 @@ int main(int argc, char** argv){
 			cout << "Missing arguments! Need three!" << endl;
 			return -1;
 	}
-	loadExposureSeq(argv[1], images, times);
+
+	loadExposureSeq(argv[1], images, times,argv[2] );
 
 	bool isNIR = false;
 	if(!static_cast<string>(argv[2]).compare("nir"))
 		isNIR = true;
-
-	cout << isNIR << endl;
 
 	makehdr(images, times, 3.5, "out.hdr", isNIR);
 	for(auto &i : images)
