@@ -49,7 +49,6 @@ void splitChannels(vector<Mat>& images, vector<Mat>& Reds, vector<Mat>& Greens, 
 }
 
 void getRandomLocation(Mat values, vector<int>& locations){
-	cout << "fuck" << endl;
 	int numPixels = values.rows*values.cols;
 	locations.clear();
 	int sameValues;
@@ -73,7 +72,11 @@ int weight(int zij){
 	int zmin = 0;
 	int zmax = 255;
 	int zmid = 0.5*(zmax - zmin);
-	return zij > zmid ? (zmax - zij) : (zij - zmin);
+	//if(zij == 255)
+	//	zij = 254;
+	//if(zij == 0)
+	//	zij = 1;
+	return zij > zmid ? (zmax - zij + 1) : (zij - zmin + 1);
 }
 
 
@@ -87,8 +90,8 @@ void LSQ(string ch, vector<Mat>* images, vector<float>& times, vector<int>& loca
 	int picNum = (*images).size();
 	int n = 256;
 
-	A = Mat::zeros(sampleSize * picNum + 255, n + sampleSize, CV_32F);
-	b = Mat::zeros(sampleSize * picNum + 255, 1, CV_32F);
+	A = Mat::zeros(sampleSize * picNum + n, n + sampleSize, CV_32F);
+	b = Mat::zeros(sampleSize * picNum + n, 1, CV_32F);
 	x = Mat::zeros(n + sampleSize, 1, CV_32F);
 
 
@@ -107,6 +110,8 @@ void LSQ(string ch, vector<Mat>* images, vector<float>& times, vector<int>& loca
 	}
 
 
+	A.at<float>(k, 127) = 1.0;
+	k++;
 	A.at<float>(k, 128) = 1.0;
 	k++;
 
@@ -148,18 +153,15 @@ void LSQ(string ch, vector<Mat>* images, vector<float>& times, vector<int>& loca
 			float sum_denom = 0.0;
 			int zij = 0;
 			float Ei = 0.f;
+			float le;
 			for (int j = 0; j < numFrames; j++) {
 				zij = static_cast<int>((*images)[j].at<uchar>(ip, jp));
-				if (zij == 255)
-					zij = 254;
-				if (zij == 0)
-					zij = 1;
 				float Ei = g[zij] - times[j];
 				int wij = weight(zij);
 				sum_numer += wij*Ei;
 				sum_denom += wij;
 			}
-			float le = sum_numer / sum_denom;
+			le = sum_numer / sum_denom;
 			(*map).at<float>(ip, jp) = exp(le);
 		}
 	}
@@ -221,6 +223,8 @@ void makehdr(vector<Mat> images, vector<float>& times, double lambda, string out
 			images[i].copyTo(Blues[i]);
 		}
 	}
+
+
 	int mid = images.size() / 2;
 	//cout << Reds[0].at<float>(0) << endl;
 	Mat red_map;
